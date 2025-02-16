@@ -142,7 +142,7 @@ class Field:
                     queue.append((nr, nc))
         return -1
     
-    def _calc_rail_route(self, start: Pos, goal: Pos) -> list[Pos]:
+    def calc_rail_route(self, start: Pos, goal: Pos) -> list[Pos]:
         # bfsをした後に、逆順に辿る
         rail_copy = [[self.rail[i][j] for j in range(self.N)] for i in range(self.N)]
         rail_copy[start[0]][start[1]] = STATION
@@ -176,52 +176,6 @@ class Field:
                 
         route.reverse()
         return route
-    
-    def build_station_and_rail(self, home: Pos, workplace: Pos) -> None:
-        # 駅の配置
-        if self.rail[home[0]][home[1]] != STATION:
-            self.build(STATION, *home)
-        if self.rail[workplace[0]][workplace[1]] != STATION:
-            self.build(STATION, *workplace)
-        
-        # 線路を配置して駅を接続する
-        route = self._calc_rail_route(home, workplace)
-        for i in range(1, len(route)-1):
-            pre0, pre1 = route[i-1]
-            now0, now1 = route[i]
-            nex0, nex1 = route[i+1]
-            
-            if self.rail[now0][now1] != EMPTY:
-                continue
-            
-            if pre0 == now0 and pre1 < now1:#右
-                if now1 < nex1:#右
-                    self.build(RAIL_HORIZONTAL, now0, now1)
-                elif now0-1 == nex0:#上
-                    self.build(RAIL_LEFT_UP, now0, now1)
-                elif now0+1 == nex0:#下
-                    self.build(RAIL_LEFT_DOWN, now0, now1)
-            elif pre0 == now0 and pre1 > now1:#左
-                if now1 > nex1:#左
-                    self.build(RAIL_HORIZONTAL, now0, now1)
-                elif now0-1 == nex0:#上
-                    self.build(RAIL_RIGHT_UP, now0, now1)
-                elif now0+1 == nex0:#下
-                    self.build(RAIL_RIGHT_DOWN, now0, now1)
-            elif pre1 == now1 and pre0 < now0:#下
-                if now0 < nex0:#下
-                    self.build(RAIL_VERTICAL, now0, now1)
-                elif now1 < nex1:#右
-                    self.build(RAIL_RIGHT_UP, now0, now1)
-                elif now1 > nex1:#左
-                    self.build(RAIL_LEFT_UP, now0, now1)
-            elif pre1 == now1 and pre0 > now0:#上
-                if now0 > nex0:#上
-                    self.build(RAIL_VERTICAL, now0, now1)
-                elif now1 < nex1:#右
-                    self.build(RAIL_RIGHT_DOWN, now0, now1)
-                elif now1 > nex1:#左
-                    self.build(RAIL_LEFT_DOWN, now0, now1)
 
 class Solver:
     def __init__(self, N: int, M: int, K: int, T: int, home: list[Pos], workplace: list[Pos]):
@@ -246,13 +200,21 @@ class Solver:
         return income
 
     def build_rail(self, type: int, r: int, c: int) -> None:
+        while(self.money < COST_RAIL):
+            self.build_nothing()
+            self.money += self.income
         self.field.build(type, r, c)
         self.money -= COST_RAIL
+        self.money += self.income
         self.actions.append(Action(type, (r, c)))
 
     def build_station(self, r: int, c: int) -> None:
+        while(self.money < COST_STATION):
+            self.build_nothing()
+            self.money += self.income
         self.field.build(STATION, r, c)
         self.money -= COST_STATION
+        self.money += self.income
         self.actions.append(Action(STATION, (r, c)))
 
     def build_nothing(self) -> None:
@@ -325,6 +287,52 @@ class Solver:
         self.income = self.calc_income()
         self.money += self.income
         
+    def build_station_and_rail(self, home: Pos, workplace: Pos) -> None:
+        # 線路を配置して駅を接続する
+        route = self.field.calc_rail_route(home, workplace)
+        for i in range(1, len(route)-1):
+            pre0, pre1 = route[i-1]
+            now0, now1 = route[i]
+            nex0, nex1 = route[i+1]
+            
+            if self.field.rail[now0][now1] != EMPTY:
+                continue
+            
+            if pre0 == now0 and pre1 < now1:#右
+                if now1 < nex1:#右
+                    self.build_rail(RAIL_HORIZONTAL, now0, now1)
+                elif now0-1 == nex0:#上
+                    self.build_rail(RAIL_LEFT_UP, now0, now1)
+                elif now0+1 == nex0:#下
+                    self.build_rail(RAIL_LEFT_DOWN, now0, now1)
+            elif pre0 == now0 and pre1 > now1:#左
+                if now1 > nex1:#左
+                    self.build_rail(RAIL_HORIZONTAL, now0, now1)
+                elif now0-1 == nex0:#上
+                    self.build_rail(RAIL_RIGHT_UP, now0, now1)
+                elif now0+1 == nex0:#下
+                    self.build_rail(RAIL_RIGHT_DOWN, now0, now1)
+            elif pre1 == now1 and pre0 < now0:#下
+                if now0 < nex0:#下
+                    self.build_rail(RAIL_VERTICAL, now0, now1)
+                elif now1 < nex1:#右
+                    self.build_rail(RAIL_RIGHT_UP, now0, now1)
+                elif now1 > nex1:#左
+                    self.build_rail(RAIL_LEFT_UP, now0, now1)
+            elif pre1 == now1 and pre0 > now0:#上
+                if now0 > nex0:#上
+                    self.build_rail(RAIL_VERTICAL, now0, now1)
+                elif now1 < nex1:#右
+                    self.build_rail(RAIL_RIGHT_DOWN, now0, now1)
+                elif now1 > nex1:#左
+                    self.build_rail(RAIL_LEFT_DOWN, now0, now1)
+                    
+        # 駅の配置
+        if self.field.rail[home[0]][home[1]] != STATION:
+            self.build_station(*home)
+        if self.field.rail[workplace[0]][workplace[1]] != STATION:
+            self.build_station(*workplace)
+        
     def main_build(self) -> None:
         """
         通常の建設
@@ -357,26 +365,23 @@ class Solver:
             
             tmp_val = expected_income - build_cost
             if max_eval[1] < tmp_val:
-                wait_times = max(0, ((build_cost - self.money + self.income - 1) // self.income) - (2 + build_rail_count))
-                max_eval = (person_idx, tmp_val, wait_times)
+                max_eval = (person_idx, tmp_val)
                    
         if max_eval[0] == -1:
             self.build_nothing()
             self.money += self.income
             return
-        
-        # 待ち時間の消費をする
-        for _ in range(max_eval[2]):
-            self.build_nothing()
-            self.money += self.income
+
+        print(max_eval, file=sys.stderr)
             
         # 配置する
         person_idx = max_eval[0]
         self.used_person[person_idx] = True
-        self.field.build_station_and_rail(self.home[person_idx], self.workplace[person_idx])
+        self.build_station_and_rail(self.home[person_idx], self.workplace[person_idx])
         
-        income = self.calc_income()
-        self.money += income
+        self.money -= self.income
+        self.income = self.calc_income()
+        self.money += self.income
 
     def solve(self) -> Result:
         # 初期処理
@@ -384,7 +389,10 @@ class Solver:
 
         # メイン処理
         while len(self.actions) < self.T:
-            self.main_build()
+            if self.income == 0:
+                self.build_nothing()
+            else:
+                self.main_build()
 
         return Result(self.actions, self.money)
 
