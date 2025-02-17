@@ -194,16 +194,13 @@ class Field:
     def calc_rail_route(self, start: Pos, goal: Pos) -> list[Pos]:
         # bfsをした後に、逆順に辿る
         rail_copy = [[self.rail[i][j] for j in range(self.N)] for i in range(self.N)]
-        rail_copy[start[0]][start[1]] = STATION        
-        rail_copy[goal[0]][goal[1]] = STATION
         
         # start地点を区画に含む駅が存在するか
         print(f"start = {start}", file=sys.stderr)
         print(f"goal = {goal}", file=sys.stderr)
         queue = []
         start_list = [start]
-        used = [[(1e9, -1, -1)] * self.N for _ in range(self.N)]# (建設コスト, 何日目に建設されるか, 何回目に訪れたか)
-        # todo 何日目かのやつは削除できる
+        used = [[(1e9, -1)] * self.N for _ in range(self.N)]# (建設コスト, 何回目に訪れたか)
         for dr in range(-2, 3):
             for dc in range(-2, 3):
                 if abs(dr) + abs(dc) > 2 or (dr == 0 and dc == 0):
@@ -213,7 +210,7 @@ class Field:
                 if 0 <= r < self.N and 0 <= c < self.N and rail_copy[r][c] == STATION:
                     queue.append((r, c))
                     start_list.append((r, c))
-                    used[r][c] = (0, 0, 0)
+                    used[r][c] = (0, 0)
         
         # goal地点を区画に含む駅が存在するか
         goal_list = []  
@@ -227,76 +224,81 @@ class Field:
                     goal_list.append((r, c))
                     
         queue.append(start)
-        used[start[0]][start[1]] = (5000, 0, 0)
+        used[start[0]][start[1]] = (5000, 0)
         while(queue):
             r, c = queue.pop(0)
             for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
                 nr = r + dr
                 nc = c + dc
                 if (0 <= nr < self.N and 0 <= nc < self.N):
-                    if rail_copy[nr][nc] == EMPTY:
+                    
+                    if (nr, nc) == goal:
                         if used[nr][nc][0] > used[r][c][0] + COST_RAIL:
-                            used[nr][nc] = (used[r][c][0] + COST_RAIL, used[r][c][1] + 1, used[r][c][2] + 1)
+                                used[nr][nc] = (used[r][c][0] + COST_RAIL, used[r][c][1] + 1)
+                                queue.append((nr, nc))
+                                
+                    elif rail_copy[nr][nc] == EMPTY:
+                        if used[nr][nc][0] > used[r][c][0] + COST_RAIL:
+                            used[nr][nc] = (used[r][c][0] + COST_RAIL, used[r][c][1] + 1)
                             queue.append((nr, nc))
                         
                     elif rail_copy[nr][nc] == STATION:
-                        if (nr, nc) == goal:
-                            if used[nr][nc][0] > used[r][c][0] + COST_STATION:
-                                used[nr][nc] = (used[r][c][0] + COST_STATION, used[r][c][1] + 1, used[r][c][2] + 1)
-                        else:
-                            if used[nr][nc][0] > used[r][c][0]:
-                                used[nr][nc] = (used[r][c][0], used[r][c][1], used[r][c][2] + 1)
-                                queue.append((nr, nc))
-                            now_station_parent = self.uf._find_root(nr * self.N + nc)
-                            for station_obj in self.station_list:
-                                # 繋がっている駅がある場合
-                                if station_obj != (nr, nc) and self.uf._find_root(station_obj[0] * self.N + station_obj[1]) == now_station_parent:
-                                    if used[station_obj[0]][station_obj[1]][0] > used[r][c][0]:
-                                        used[station_obj[0]][station_obj[1]] = (used[r][c][0], used[r][c][1], used[r][c][2] + 1)
-                                        queue.append(station_obj)
-        
+                        if used[nr][nc][0] > used[r][c][0]:
+                            used[nr][nc] = (used[r][c][0], used[r][c][1] + 1)
+                            queue.append((nr, nc))
+                        now_station_parent = self.uf._find_root(nr * self.N + nc)
+                        for station_obj in self.station_list:
+                            # 繋がっている駅がある場合
+                            if station_obj != (nr, nc) and self.uf._find_root(station_obj[0] * self.N + station_obj[1]) == now_station_parent:
+                                if used[station_obj[0]][station_obj[1]][0] > used[nr][nc][0]:
+                                    used[station_obj[0]][station_obj[1]] = (used[nr][nc][0], used[nr][nc][1] + 1)
+                                    queue.append(station_obj)
+                                    
+        used[goal[0]][goal[1]] = (used[goal[0]][goal[1]][0] - COST_RAIL + COST_STATION, used[goal[0]][goal[1]][1])
         best_val = (used[goal[0]][goal[1]], goal)# (評価コスト, 位置)
         for goal_obj in goal_list:
             if used[goal_obj[0]][goal_obj[1]][1] == -1:
                 continue
-            if best_val[0] > used[goal_obj[0]][goal_obj[1]][0]:
+            if best_val[0][0] > used[goal_obj[0]][goal_obj[1]][0]:
                 best_val = (used[goal_obj[0]][goal_obj[1]], goal_obj)
         
         route = [best_val[1]]
-        print(goal, file=sys.stderr)
-        print(best_val, file=sys.stderr)
-        print(used[best_val[1][0]][best_val[1][1]], file=sys.stderr)
         now = best_val[1]
-        print(start_list)
+        print(f"best_val = {best_val}", file=sys.stderr)
+        print(f"usd_best[val] = {used[best_val[1][0]][best_val[1][1]]}", file=sys.stderr)
+        print(used[36][40], file=sys.stderr)
+        print(used[0][8], file=sys.stderr)
         while(not now in start_list):
-            print(now)
-            print(rail_copy[now[0]][now[1]])
+            print(f"now = {now}, used = {used[now[0]][now[1]]}")
             r, c = now
             for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
                 nr = r + dr
                 nc = c + dc
                 if (0 <= nr < self.N and 0 <= nc < self.N):
-                    if (r, c) == goal:
-                        used[nr][nc] == (used[r][c][0] - COST_STATION, used[r][c][1] - 1)
-                        now = (nr, nc)
-                        break
-                    elif used[nr][nc] == (used[r][c][0] - COST_RAIL, used[r][c][1] - 1):
+                    print(f"nex = {(nr, nc)}, used = {used[nr][nc]}")
+                    if used[nr][nc][1] !=  used[r][c][1] - 1:
+                        continue
+                    
+                    if (r, c) == goal and used[nr][nc][0] == used[r][c][0] - COST_STATION:
                         route.append((nr, nc))
                         now = (nr, nc)
                         break
-                    elif rail_copy[nr][nc] == STATION:
-                        if used[nr][nc] == used[r][c]:
-                            route.append((nr, nc))
-                            now = (nr, nc)
-                            break
+                    elif rail_copy[r][c] == STATION and used[nr][nc][0] == used[r][c][0]:
+                        route.append((nr, nc))
+                        now = (nr, nc)
+                        break
+                    elif used[nr][nc][0] == used[r][c][0] - COST_RAIL:
+                        route.append((nr, nc))
+                        now = (nr, nc)
+                        break
+                        
             if now == (r, c):
                 for station_obj in self.station_list:
-                    if used[station_obj[0]][station_obj[1]][2] == used[r][c][2] - 1:
+                    if used[station_obj[0]][station_obj[1]] == (used[r][c][0], used[r][c][1] - 1):
                         route.append(station_obj)
                         now = station_obj
                         break
-        
-        print("end", file=sys.stderr)    
+          
         route.reverse()
         return route
 
@@ -417,14 +419,13 @@ class Solver:
     def build_station_and_rail(self, home: Pos, workplace: Pos) -> None:
         # 線路を配置して駅を接続する
         route = self.field.calc_rail_route(home, workplace)
-        station_list = []
         for i in range(1, len(route)-1):
             pre0, pre1 = route[i-1]
             now0, now1 = route[i]
             nex0, nex1 = route[i+1]
             
             if self.field.rail[now0][now1] == STATION:
-                station_list.append((now0, now1))
+                continue
             
             if pre0 == now0 and pre1 < now1:#右
                 if now1 < nex1:#右
@@ -456,8 +457,8 @@ class Solver:
                     self.build_rail(RAIL_LEFT_DOWN, now0, now1)
                     
         # 駅の配置
-        for station_obj in station_list:
-            self.build_station(*station_obj)
+        self.build_station(*route[0])
+        self.build_station(*route[-1])
         
     def main_build(self) -> None:
         """
