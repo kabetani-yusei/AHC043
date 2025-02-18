@@ -1,8 +1,7 @@
 # やりたいこと
 
 ## 明日やること
-- Stationの区画内なら、新しくStationを作る必要はない
-- Station -> Stationならその分をskipできる->bfsに追加する？
+- start地点から2×2はすべて、Stationの候補としてbfsに追加する
 
 # 貪欲で決めていきたい
 ## 管理する情報
