@@ -1,5 +1,5 @@
 import sys
-from collections import deque
+from collections import deque, defaultdict
 
 Pos = tuple[int, int]
 EMPTY = -1
@@ -280,27 +280,38 @@ class Solver:
         self.home = home
         self.workplace = workplace
         self.used_person = [False] * M
+        self.next_person_candidate = [False] * M
+        self.person_mapping = [[[] for _ in range(N)] for _ in range(N)]
+        for i in range(M):
+            self.person_mapping[home[i][0]][home[i][1]].append(i)
+            self.person_mapping[workplace[i][0]][workplace[i][1]].append(i)
         self.field = Field(N)
         self.money = K
         self.income = 0
         self.actions = []
         
-    def _check_connected(self, target_person_idx:int, i:int) -> bool:
-        if distance(self.home[target_person_idx], self.home[i]) <= 2:
+    def _check_connected(self, r0: int, c0: int, r1: int, c1: int, i:int) -> bool:
+        r2, c2 = self.home[i]
+        r3, c3 = self.workplace[i]
+        if abs(r0-r2) + abs(c0-c2) <= 2:
+            self.next_person_candidate[i] = True
             return self.field.is_connected(self.home[i], self.workplace[i])
-        elif distance(self.home[target_person_idx], self.workplace[i]) <= 2:
+        elif abs(r0-r3) + abs(c0-c3) <= 2:
+            self.next_person_candidate[i] = True
             return self.field.is_connected(self.home[i], self.workplace[i])
-        elif distance(self.workplace[target_person_idx], self.home[i]) <= 2:
+        elif abs(r1-r2) + abs(c1-c2) <= 2:
+            self.next_person_candidate[i] = True
             return self.field.is_connected(self.home[i], self.workplace[i])
-        elif distance(self.workplace[target_person_idx], self.workplace[i]) <= 2:
+        elif abs(r1-r3) + abs(c1-c3) <= 2:
+            self.next_person_candidate[i] = True
             return self.field.is_connected(self.home[i], self.workplace[i])
         else:
             return False
 
-    def calc_income(self, target_person_idx):
+    def calc_income(self, r0: int, c0: int, r1: int, c1: int) -> None:
         self.income = 0
         for i in range(self.M):
-            if self.used_person[i] or self._check_connected(target_person_idx, i):
+            if self.used_person[i] or self._check_connected(r0, c0, r1, c1, i):
                 self.income += distance(self.home[i], self.workplace[i])
 
     def build_rail(self, type: int, r: int, c: int) -> None:
@@ -326,44 +337,80 @@ class Solver:
 
     def build_nothing(self) -> None:
         self.actions.append(Action(DO_NOTHING, (0, 0)))
+        
+    def _calclate_expected_income(self, r0, c0, r1, c1) -> int:
+        expected_income = 0
+        person_num = 0
+        h = defaultdict(lambda: 0)
+        for dr, dc in STATION_AREA_DIR:
+            rr0 = r0 + dr
+            cc0 = c0 + dc
+            rr1 = r1 + dr
+            cc1 = c1 + dc
+            if 0 <= rr0 < self.N and 0 <= cc0 < self.N:
+                for person_idx in self.person_mapping[rr0][cc0]:
+                    person_num += 1
+                    h[person_idx] += 1
+                    if h[person_idx] == 2:
+                        expected_income += distance(self.home[person_idx], self.workplace[person_idx])
+                        person_num -= 1
+            if 0 <= rr1 < self.N and 0 <= cc1 < self.N:
+                for person_idx in self.person_mapping[rr1][cc1]:
+                    person_num += 1
+                    h[person_idx] += 1
+                    if h[person_idx] == 2:
+                        expected_income += distance(self.home[person_idx], self.workplace[person_idx])
+                        person_num -= 1
+        return expected_income, person_num
     
-    def initial_build(self) -> None:
+    def initial_build(self) -> bool:
         """
-        初期段階で配置する駅と線路を配置する
+        初期段階で配置する駅と線路を配置する(home => workで各abs2以下のマス全探索)
         評価値：
             800ターン目に得られるコスト - 建設するコスト
         """
-        rail_count = (self.K - COST_STATION * 2) // COST_RAIL
-        max_eval = [-1, -1e9]# [person_idx, 最大の評価値]
+        remaining_rail_count = (self.K - COST_STATION * 2) // COST_RAIL
+        best_eval = (-1,-1) # [現時点でのincome, stationに含まれるpersonの数]
+        best_place = [] # [(), ()] 駅の座標が2つ
         for person_idx in range(self.M):
             dist = distance(self.home[person_idx], self.workplace[person_idx])
-            build_rail_count = dist - 1
-            if build_rail_count > rail_count:
+            if dist - 5 > remaining_rail_count:
                 continue
             
-            build_days = 2 + build_rail_count
-            build_cost = COST_STATION * 2 + COST_RAIL * build_rail_count
-            expected_income = (self.T - build_days) *  dist
-            
-            tmp_val = expected_income - build_cost
-            if tmp_val > 0 and max_eval[1] < tmp_val:
-                max_eval = [person_idx, tmp_val]
+            for start_dr, start_dc in STATION_AREA_DIR:
+                start_r = self.home[person_idx][0] + start_dr
+                start_c = self.home[person_idx][1] + start_dc
+                if not (0 <= start_r < self.N and 0 <= start_c < self.N):
+                    continue
+                for goal_dr, goal_dc in STATION_AREA_DIR:
+                    goal_r = self.workplace[person_idx][0] + goal_dr
+                    goal_c = self.workplace[person_idx][1] + goal_dc
+                    if not (0 <= goal_r < self.N and 0 <= goal_c < self.N):
+                        continue
+                    station_dist = distance((start_r, start_c), (goal_r, goal_c))
+                    if station_dist - 1 > remaining_rail_count:
+                        continue
+                    expected_income, person_num = self._calclate_expected_income(start_r, start_c, goal_r, goal_c)
+                    expected_money = ((797 - station_dist) * expected_income) - (COST_STATION * 2 + COST_RAIL * (station_dist-1))
+                    if expected_money > 0:
+                        if expected_income > best_eval[0]:
+                            best_eval = (expected_income, person_num)
+                            best_place = [(start_r, start_c), (goal_r, goal_c)]
+                        elif expected_income == best_eval[0] and person_num > best_eval[1]:
+                            best_eval = (expected_income, person_num)
+                            best_place = [(start_r, start_c), (goal_r, goal_c)]
                    
-        if max_eval[0] == -1:
+        if best_eval[0] == -1:
             self.build_nothing()
-            return
-        
-        # 配置する
-        person_idx = max_eval[0]
-        self.used_person[person_idx] = True
+            return False
         
         # 駅の配置
-        self.build_station(*self.home[person_idx])
-        self.build_station(*self.workplace[person_idx])
+        self.build_station(*best_place[0])
+        self.build_station(*best_place[1])
         
         # 線路を配置して駅を接続する
-        r0, c0 = self.home[person_idx]
-        r1, c1 = self.workplace[person_idx]
+        r0, c0 = best_place[0]
+        r1, c1 = best_place[1]
         # r0 -> r1
         if r0 < r1:
             for r in range(r0 + 1, r1):
@@ -387,8 +434,9 @@ class Solver:
             for c in range(c0 - 1, c1, -1):
                 self.build_rail(RAIL_HORIZONTAL, r1, c)
         
-        self.calc_income(person_idx)
+        self.calc_income(r0, c0, r1, c1)
         self.money += self.income
+        return True
         
     def build_station_and_rail(self, home: Pos, workplace: Pos) -> None:
         # 線路を配置して駅を接続する
@@ -469,24 +517,26 @@ class Solver:
         self.build_station_and_rail(self.home[person_idx], self.workplace[person_idx])
         
         self.money -= self.income
-        self.calc_income(person_idx)
+        self.calc_income(*self.home[person_idx], *self.workplace[person_idx])
         self.money += self.income
         return True
 
     def solve(self) -> Result:
         # 初期処理
-        self.initial_build()
-
-        # メイン処理
-        flag = False
-        while len(self.actions) < self.T:
-            if self.income == 0 or flag:
+        if self.initial_build() and False:
+            flag = False
+            while len(self.actions) < self.T:
+                if flag:
+                    self.build_nothing()
+                    self.money += self.income
+                else:
+                    while(self.main_build()):
+                        pass
+                    flag = True
+            
+        else:
+            while len(self.actions) < self.T:
                 self.build_nothing()
-                self.money += self.income
-            else:
-                while(self.main_build()):
-                    pass
-                flag = True
 
         return Result(self.actions, self.money)
 
