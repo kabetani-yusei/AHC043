@@ -257,10 +257,12 @@ class Solver:
             
         for rr0, cc0 in list(a):
             for person_idx in self.person_mapping[rr0][cc0]:
-                person_num += 1
+                score = distance(self.home[person_idx], self.workplace[person_idx])
+                if score >= 20:
+                    person_num += 1
                 h[person_idx] += 1
                 if h[person_idx] == 2:
-                    expected_income += distance(self.home[person_idx], self.workplace[person_idx])
+                    expected_income += score
                     person_num -= 2
         assert expected_income != 0
         return expected_income, person_num
@@ -407,7 +409,8 @@ class Solver:
         評価値：
             (income, stationに含まれる人の数)
         """
-        best_eval = (-1,-1) # 現時点でのincome, stationに含まれるpersonの数]
+        remaining_turn = self.T - len(self.actions)
+        best_eval = (-1,-1,-1) # incomeの増加分, stationに含まれるpersonの数, build_cost]
         best_place = None # (person_idx, (r, c))　駅の座標 
         self.field.setup_calc_expected_score()
         for person_idx in range(self.M):
@@ -422,19 +425,38 @@ class Solver:
             
             # score: (expected_income, person_num, (r, c))
             for tmp_score in score_list:
-                build_days = max(tmp_score[1][1], (tmp_score[1][0] - self.money + self.income - 1) // self.income)
-                if tmp_score[1][1] == -1 or build_days > self.T - len(self.actions):
+                build_cost, build_days = tmp_score[1]
+                build_days = max(build_days, (build_cost - self.money + self.income - 1) // self.income)
+                if build_days > remaining_turn:
                     continue
                 expected_income, person_num = self._calclate_expected_income_main(*tmp_score[0])
-                expected_money = ((self.T - len(self.actions) - build_days) * expected_income) - tmp_score[1][0]
-                if expected_money > 0:
-                    if expected_income > best_eval[0]:
-                        best_eval = (expected_income, person_num)
+                expected_money = ((remaining_turn - build_days) * expected_income) - build_cost
+                if remaining_turn <= 200:
+                    # best_eval = (expected_money, build_days, expected_incomeにする)
+                    if expected_money > best_eval[0]:
+                        best_eval = (expected_money, build_days, expected_income)
                         best_place = (person_idx, tmp_score[0])
-                    elif expected_income == best_eval[0] and person_num > best_eval[1]:
-                        best_eval = (expected_income, person_num)
-                        best_place = (person_idx, tmp_score[0])
-                   
+                    elif expected_money == best_eval[0]:
+                        if build_days < best_eval[1]:
+                            best_eval = (expected_money, build_days, expected_income)
+                            best_place = (person_idx, tmp_score[0])
+                        elif build_days == best_eval[1] and expected_income > best_eval[2]:
+                            best_eval = (expected_money, build_days, expected_income)
+                            best_place = (person_idx, tmp_score[0])
+                        
+                else:
+                    if expected_money > 0:
+                        if expected_income > best_eval[0]:
+                            best_eval = (expected_income, person_num, build_cost)
+                            best_place = (person_idx, tmp_score[0])
+                        elif expected_income == best_eval[0]:
+                            if person_num > best_eval[1]:
+                                best_eval = (expected_income, person_num, build_cost)
+                                best_place = (person_idx, tmp_score[0])
+                            elif person_num == best_eval[1] and build_cost < best_eval[2]:
+                                best_eval = (expected_income, person_num, build_cost)
+                                best_place = (person_idx, tmp_score[0])
+                                 
         if best_place is None:
             self.build_nothing()
             self.money += self.income
