@@ -46,7 +46,9 @@ class Field:
         self.N = N
         self.rail = [[EMPTY] * N for _ in range(N)]
         self.station_list = set()
-        self.used = None
+        self.used = [[(0, 0) for _ in range(self.N)] for _ in range(self.N)]
+        self.used_pos = [[False] * N for _ in range(N)]
+        self.parent = None
 
     def build(self, type: int, r: int, c: int) -> None:
         assert self.rail[r][c] != STATION
@@ -60,14 +62,19 @@ class Field:
         """
         bfsによって、self.usedを更新する
         """
+        for i in range(self.N):
+            for j in range(self.N):
+                self.used_pos[i][j] = False
+                self.used[i][j] = (0, 2600)
+                
         # bfsによって求める
         queue = deque()
-        self.used = [[(int(1e9), -1) for _ in range(self.N)] for _ in range(self.N)]# (建設コスト, 何日目に訪れたか)
-        
+        self.parent = {}
         # start地点にはどうせ駅がある->すべての駅を(0,0)にすればいい
         for station_obj in self.station_list:
             queue.append(station_obj)
             self.used[station_obj[0]][station_obj[1]] = (0, 0)
+            self.parent[station_obj] = None
             
         while(queue):
             r, c = queue.popleft()
@@ -76,15 +83,13 @@ class Field:
                 nc = c + dc
                 if (0 <= nr < self.N and 0 <= nc < self.N):
                     if self.rail[nr][nc] == EMPTY:
-                        if self.used[nr][nc][0] > self.used[r][c][0] + COST_RAIL:
+                        if self.used[nr][nc][1] > self.used[r][c][1] + 1:
                             self.used[nr][nc] = (self.used[r][c][0] + COST_RAIL, self.used[r][c][1] + 1)
                             queue.append((nr, nc))
-                        elif self.used[nr][nc][0] == self.used[r][c][0] + COST_RAIL and self.used[nr][nc][1] > self.used[r][c][1] + 1:
-                            self.used[nr][nc] = (self.used[r][c][0] + COST_RAIL, self.used[r][c][1] + 1)
-                            queue.append((nr, nc))
+                            self.parent[(nr, nc)] = (r, c)
          
     
-    def calc_expected_score(self, start: Pos, goal: Pos) -> tuple[int, int]:
+    def calc_expected_score(self, goal: Pos) -> tuple[int, int]:
         """
         start地点からgoal地点までの最適な経路を求める
         score_list = [((r, c), (build_cost, build_days)), ((r, c), (build_cost, build_days)), ...]
@@ -93,7 +98,8 @@ class Field:
         for dr, dc in STATION_AREA_DIR:
             r = goal[0] + dr
             c = goal[1] + dc
-            if 0 <= r < self.N and 0 <= c < self.N:
+            if 0 <= r < self.N and 0 <= c < self.N and (not self.used_pos[r][c]):
+                self.used_pos[r][c] = True
                 # railの上に駅を立てる場合
                 if 1 <= self.rail[r][c] <= 6:
                     score_list.append(((r, c), (5000,1)))
@@ -102,46 +108,15 @@ class Field:
                     score_list.append(((r, c), (self.used[r][c][0] - COST_RAIL + COST_STATION, self.used[r][c][1])))
         return score_list
     
-    def calc_rail_route(self, start: Pos, goal: Pos) -> list[Pos]:
-        # bfsによってgoalからstartに向かって辿る
-        parent = {}
-        
-        # railの上に駅を立てる場合の例外処理
+    def calc_rail_route(self, goal: Pos) -> list[Pos]:
         if 1 <= self.rail[goal[0]][goal[1]] <= 6:
             return [goal]
                 
-        used = [[int(1e9) for _ in range(self.N)] for _ in range(self.N)]# 何日目に訪れたか
-        queue = deque()
-        queue.append(goal)
-        used[goal[0]][goal[1]] = 0
-        parent[goal] = None
-        best_station = None
-        
-        while(queue):
-            r, c = queue.popleft()
-            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-                nr = r + dr
-                nc = c + dc
-                if (0 <= nr < self.N and 0 <= nc < self.N):
-                    if self.rail[nr][nc] == EMPTY:
-                        if used[nr][nc] > used[r][c] + 1:
-                            used[nr][nc] = used[r][c] + 1
-                            queue.append((nr, nc))
-                            parent[(nr, nc)] = (r, c)
-                        
-                    elif self.rail[nr][nc] == STATION:
-                        best_station = (nr, nc)
-                        used[nr][nc] = used[r][c] + 1
-                        parent[(nr, nc)] = (r, c)
-                        break
-            if best_station != None:
-                break
-        
-        parent_route = [best_station]
-        now = best_station
-        while(parent[now] != None):
-            parent_route.append(parent[now])
-            now = parent[now]
+        parent_route = [goal]
+        now = goal
+        while(self.parent[now] != None):
+            parent_route.append(self.parent[now])
+            now = self.parent[now]
         return parent_route
 
 
@@ -155,12 +130,15 @@ class Solver:
         self.workplace = workplace
         self.used_person = [False] * M
         self.next_person_candidate = [False] * M
+        self.ng_person_list = [False] * M
         
         # pos -> person_idx
         self.person_mapping = [[[] for _ in range(N)] for _ in range(N)]
         for i in range(M):
             self.person_mapping[home[i][0]][home[i][1]].append(i)
             self.person_mapping[workplace[i][0]][workplace[i][1]].append(i)
+            if distance(home[i], workplace[i]) <= 10:
+                self.ng_person_list[i] = True
             
         self.station_space = [[False] * N for _ in range(N)]
         self.field = Field(N)
@@ -342,9 +320,9 @@ class Solver:
         self.money += self.income
         return True
         
-    def build_main_section(self, start: Pos, goal: Pos) -> None:
+    def build_main_section(self, goal: Pos) -> None:
         # 線路を配置して駅を接続する
-        route = self.field.calc_rail_route(start, goal)
+        route = self.field.calc_rail_route(goal)
         for i in range(1, len(route)-1):
             pre0, pre1 = route[i-1]
             now0, now1 = route[i]
@@ -414,14 +392,14 @@ class Solver:
         best_place = None # (person_idx, (r, c))　駅の座標 
         self.field.setup_calc_expected_score()
         for person_idx in range(self.M):
-            if self.used_person[person_idx] or not self.next_person_candidate[person_idx]:
+            if self.used_person[person_idx] or not self.next_person_candidate[person_idx] or self.ng_person_list[person_idx]:
                 continue
             
             # score_list = [((r, c), (build_cost, build_days)), ((r, c), (build_cost, build_days)), ...]
             if self.station_space[self.home[person_idx][0]][self.home[person_idx][1]]:
-                score_list = self.field.calc_expected_score(self.home[person_idx], self.workplace[person_idx])
+                score_list = self.field.calc_expected_score(self.workplace[person_idx])
             else:
-                score_list = self.field.calc_expected_score(self.workplace[person_idx], self.home[person_idx])
+                score_list = self.field.calc_expected_score(self.home[person_idx])
             
             # score: (expected_income, person_num, (r, c))
             for tmp_score in score_list:
@@ -466,11 +444,7 @@ class Solver:
                   
         # 配置する
         person_idx, best_place = best_place
-        if self.station_space[self.home[person_idx][0]][self.home[person_idx][1]]:
-            self.build_main_section(self.home[person_idx], best_place)
-        else:
-            self.build_main_section(self.workplace[person_idx], best_place)
-        
+        self.build_main_section(best_place)
         self.money -= self.income
         self.calc_income_main(*best_place)
         self.money += self.income
