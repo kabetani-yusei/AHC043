@@ -47,8 +47,25 @@ class Field:
         self.rail = [[EMPTY] * N for _ in range(N)]
         self.station_list = set()
         self.used = [[(0, 0) for _ in range(self.N)] for _ in range(self.N)]
-        self.used_pos = [[False] * N for _ in range(N)]
-        self.parent = None
+        self.used_pos = [[False] * self.N for _ in range(self.N)]
+        
+        self.person_density = [[0] * self.N for _ in range(N)]
+        
+    def set_up_init_field(self, m, home, workplace):
+        for i in range(m):
+            r1 = home[i][0]
+            c1 = home[i][1]
+            r2 = workplace[i][0]
+            c2 = workplace[i][1]
+            for dr, dc in STATION_AREA_DIR:
+                rr1 = r1 + dr
+                cc1 = c1 + dc
+                rr2 = r2 + dr
+                cc2 = c2 + dc
+                if 0<=rr1<self.N and 0<=cc1<self.N:
+                    self.person_density[rr1][cc1] += 1
+                if 0<=rr2<self.N and 0<=cc2<self.N:
+                    self.person_density[rr2][cc2] += 1
 
     def build(self, type: int, r: int, c: int) -> None:
         assert self.rail[r][c] != STATION
@@ -57,6 +74,49 @@ class Field:
         self.rail[r][c] = type
         if type == STATION:
             self.station_list.add((r, c))
+            
+    def calc_initial_route(self, r0, c0, r1, c1) -> list[Pos]:
+        """
+        01bfsをして、通ったルートのperson_desityを最大化する
+        """
+        if r0 <= r1:
+            rr0, rr1 = r0, r1
+        else:
+            rr0, rr1 = r1, r0
+        if c0 <= c1:
+            cc0, cc1 = c0, c1
+        else:
+            cc0, cc1 = c1, c0
+        
+        used = [[(1e9, 0)] * self.N for _ in range(self.N)] #到達回数、人数
+        queue = deque()
+        queue.append((r0, c0))
+        used[r0][c0] = (0, self.person_density[r0][c0])
+        parent = {}
+        parent[(r0, c0)] = None
+        while(queue):
+            r, c = queue.popleft()
+            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                nr = r + dr
+                nc = c + dc
+                if rr0 <= nr <= rr1 and cc0 <= nc <= cc1:
+                    if used[nr][nc][0] > used[r][c][0] + 1:
+                        used[nr][nc] = (used[r][c][0] + 1, used[r][c][1] + self.person_density[nr][nc])
+                        queue.append((nr, nc))
+                        parent[(nr, nc)] = (r, c)
+                    elif used[nr][nc][0] == used[r][c][0] + 1 and used[nr][nc][1] < used[r][c][1] + self.person_density[nr][nc]:
+                        used[nr][nc] = (used[r][c][0] + 1, used[r][c][1] + self.person_density[nr][nc])
+                        queue.append((nr, nc))
+                        parent[(nr, nc)] = (r, c)
+        
+        initial_route = [(r1, c1)]
+        now = (r1, c1)
+        while(parent[now] != None):
+            initial_route.append(parent[now])
+            now = parent[now]
+            
+        return initial_route
+        
             
     def setup_calc_expected_score(self) -> None:
         """
@@ -69,12 +129,10 @@ class Field:
                 
         # bfsによって求める
         queue = deque()
-        self.parent = {}
         # start地点にはどうせ駅がある->すべての駅を(0,0)にすればいい
         for station_obj in self.station_list:
             queue.append(station_obj)
             self.used[station_obj[0]][station_obj[1]] = (0, 0)
-            self.parent[station_obj] = None
             
         while(queue):
             r, c = queue.popleft()
@@ -86,7 +144,6 @@ class Field:
                         if self.used[nr][nc][1] > self.used[r][c][1] + 1:
                             self.used[nr][nc] = (self.used[r][c][0] + COST_RAIL, self.used[r][c][1] + 1)
                             queue.append((nr, nc))
-                            self.parent[(nr, nc)] = (r, c)
          
     
     def calc_expected_score(self, goal: Pos) -> tuple[int, int]:
@@ -112,11 +169,50 @@ class Field:
         if 1 <= self.rail[goal[0]][goal[1]] <= 6:
             return [goal]
                 
-        parent_route = [goal]
-        now = goal
-        while(self.parent[now] != None):
-            parent_route.append(self.parent[now])
-            now = self.parent[now]
+        used = [[(1e9, 0)] * self.N for _ in range(self.N)] #到達回数、人数
+        queue = deque()
+        queue.append(goal)
+        used[goal[0]][goal[1]] = (0, self.person_density[goal[0]][goal[1]])
+        parent = {}
+        parent[goal] = None
+        station_best = ((1e9, 0), (0,0)) # 回数と人数と場所
+        while(queue):
+            r, c = queue.popleft()
+            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                nr = r + dr
+                nc = c + dc
+                if 0 <= nr < self.N and 0 <= nc < self.N:
+                    if self.rail[nr][nc] == EMPTY:
+                        if used[nr][nc][0] > used[r][c][0] + 1:
+                            used[nr][nc] = (used[r][c][0] + 1, used[r][c][1] + self.person_density[nr][nc])
+                            queue.append((nr, nc))
+                            parent[(nr, nc)] = (r, c)
+                        elif used[nr][nc][0] == used[r][c][0] + 1 and used[nr][nc][1] < used[r][c][1] + self.person_density[nr][nc]:
+                            used[nr][nc] = (used[r][c][0] + 1, used[r][c][1] + self.person_density[nr][nc])
+                            queue.append((nr, nc))
+                            parent[(nr, nc)] = (r, c)
+                    elif self.rail[nr][nc] == STATION:
+                        if used[nr][nc][0] > used[r][c][0] + 1:
+                            used[nr][nc] = (used[r][c][0] + 1, used[r][c][1] + self.person_density[nr][nc])
+                            parent[(nr, nc)] = (r, c)
+                            if used[nr][nc][0] < station_best[0][0]:
+                                station_best = (used[nr][nc], (nr, nc))
+                            elif used[nr][nc][0] == station_best[0][0] and used[nr][nc][1] > station_best[0][1]:
+                                station_best = (used[nr][nc], (nr, nc))
+                        elif used[nr][nc][0] == used[r][c][0] + 1 and used[nr][nc][1] < used[r][c][1] + self.person_density[nr][nc]:
+                            used[nr][nc] = (used[r][c][0] + 1, used[r][c][1] + self.person_density[nr][nc])
+                            parent[(nr, nc)] = (r, c)
+                            if used[nr][nc][0] < station_best[0][0]:
+                                station_best = (used[nr][nc], (nr, nc))
+                            elif used[nr][nc][0] == station_best[0][0] and used[nr][nc][1] > station_best[0][1]:
+                                station_best = (used[nr][nc], (nr, nc))
+                            
+                        
+        parent_route = [station_best[1]]
+        now = station_best[1]
+        while(parent[now] != None):
+            parent_route.append(parent[now])
+            now = parent[now]
         return parent_route
 
 
@@ -142,6 +238,7 @@ class Solver:
             
         self.station_space = [[False] * N for _ in range(N)]
         self.field = Field(N)
+        self.field.set_up_init_field(M, home, workplace)
         self.money = K
         self.income = 0
         self.actions = []
@@ -216,6 +313,49 @@ class Solver:
 
     def build_nothing(self) -> None:
         self.actions.append(Action(DO_NOTHING, (0, 0)))
+    
+    def route_placement(self, route) -> None:
+        # ルートに従って、線路と駅を配置する
+        for i in range(1, len(route)-1):
+            pre0, pre1 = route[i-1]
+            now0, now1 = route[i]
+            nex0, nex1 = route[i+1]
+            
+            if self.field.rail[now0][now1] == STATION:
+                continue
+            
+            if pre0 == now0 and pre1 < now1:#右
+                if now1 < nex1:#右
+                    self.build_rail(RAIL_HORIZONTAL, now0, now1)
+                elif now0-1 == nex0:#上
+                    self.build_rail(RAIL_LEFT_UP, now0, now1)
+                elif now0+1 == nex0:#下
+                    self.build_rail(RAIL_LEFT_DOWN, now0, now1)
+            elif pre0 == now0 and pre1 > now1:#左
+                if now1 > nex1:#左
+                    self.build_rail(RAIL_HORIZONTAL, now0, now1)
+                elif now0-1 == nex0:#上
+                    self.build_rail(RAIL_RIGHT_UP, now0, now1)
+                elif now0+1 == nex0:#下
+                    self.build_rail(RAIL_RIGHT_DOWN, now0, now1)
+            elif pre1 == now1 and pre0 < now0:#下
+                if now0 < nex0:#下
+                    self.build_rail(RAIL_VERTICAL, now0, now1)
+                elif now1 < nex1:#右
+                    self.build_rail(RAIL_RIGHT_UP, now0, now1)
+                elif now1 > nex1:#左
+                    self.build_rail(RAIL_LEFT_UP, now0, now1)
+            elif pre1 == now1 and pre0 > now0:#上
+                if now0 > nex0:#上
+                    self.build_rail(RAIL_VERTICAL, now0, now1)
+                elif now1 < nex1:#右
+                    self.build_rail(RAIL_RIGHT_DOWN, now0, now1)
+                elif now1 > nex1:#左
+                    self.build_rail(RAIL_LEFT_DOWN, now0, now1)
+                    
+        # 駅の配置
+        self.build_station(*route[0])
+        self.build_station(*route[-1])
         
     def _calclate_expected_income_initial(self, r0, c0, r1, c1) -> int:
         expected_income = 0
@@ -293,76 +433,11 @@ class Solver:
         # 線路を配置して駅を接続する
         r0, c0 = best_place[0]
         r1, c1 = best_place[1]
-        # r0 -> r1
-        if r0 < r1:
-            for r in range(r0 + 1, r1):
-                self.build_rail(RAIL_VERTICAL, r, c0)
-            if c0 < c1:
-                self.build_rail(RAIL_RIGHT_UP, r1, c0)
-            elif c0 > c1:
-                self.build_rail(RAIL_LEFT_UP, r1, c0)
-        elif r0 > r1:
-            for r in range(r0 - 1, r1, -1):
-                self.build_rail(RAIL_VERTICAL, r, c0)
-            if c0 < c1:
-                self.build_rail(RAIL_RIGHT_DOWN, r1, c0)
-            elif c0 > c1:
-                self.build_rail(RAIL_LEFT_DOWN, r1, c0)
-        # c0 -> c1
-        if c0 < c1:
-            for c in range(c0 + 1, c1):
-                self.build_rail(RAIL_HORIZONTAL, r1, c)
-        elif c0 > c1:
-            for c in range(c0 - 1, c1, -1):
-                self.build_rail(RAIL_HORIZONTAL, r1, c)
-        
+        route = self.field.calc_initial_route(r0, c0, r1, c1)
+        self.route_placement(route)
         self.calc_income(r0, c0, r1, c1)
         self.money += self.income
         return True
-        
-    def build_main_section(self, goal: Pos) -> None:
-        # 線路を配置して駅を接続する
-        route = self.field.calc_rail_route(goal)
-        for i in range(1, len(route)-1):
-            pre0, pre1 = route[i-1]
-            now0, now1 = route[i]
-            nex0, nex1 = route[i+1]
-            
-            if self.field.rail[now0][now1] == STATION:
-                continue
-            
-            if pre0 == now0 and pre1 < now1:#右
-                if now1 < nex1:#右
-                    self.build_rail(RAIL_HORIZONTAL, now0, now1)
-                elif now0-1 == nex0:#上
-                    self.build_rail(RAIL_LEFT_UP, now0, now1)
-                elif now0+1 == nex0:#下
-                    self.build_rail(RAIL_LEFT_DOWN, now0, now1)
-            elif pre0 == now0 and pre1 > now1:#左
-                if now1 > nex1:#左
-                    self.build_rail(RAIL_HORIZONTAL, now0, now1)
-                elif now0-1 == nex0:#上
-                    self.build_rail(RAIL_RIGHT_UP, now0, now1)
-                elif now0+1 == nex0:#下
-                    self.build_rail(RAIL_RIGHT_DOWN, now0, now1)
-            elif pre1 == now1 and pre0 < now0:#下
-                if now0 < nex0:#下
-                    self.build_rail(RAIL_VERTICAL, now0, now1)
-                elif now1 < nex1:#右
-                    self.build_rail(RAIL_RIGHT_UP, now0, now1)
-                elif now1 > nex1:#左
-                    self.build_rail(RAIL_LEFT_UP, now0, now1)
-            elif pre1 == now1 and pre0 > now0:#上
-                if now0 > nex0:#上
-                    self.build_rail(RAIL_VERTICAL, now0, now1)
-                elif now1 < nex1:#右
-                    self.build_rail(RAIL_RIGHT_DOWN, now0, now1)
-                elif now1 > nex1:#左
-                    self.build_rail(RAIL_LEFT_DOWN, now0, now1)
-                    
-        # 駅の配置
-        self.build_station(*route[0])
-        self.build_station(*route[-1])
         
     def _calclate_expected_income_main(self, r0, c0) -> int:
         expected_income = 0
@@ -444,7 +519,9 @@ class Solver:
                   
         # 配置する
         person_idx, best_place = best_place
-        self.build_main_section(best_place)
+        self.used_person[person_idx] = True
+        route = self.field.calc_rail_route(best_place)
+        self.route_placement(route)
         self.money -= self.income
         self.calc_income_main(*best_place)
         self.money += self.income
