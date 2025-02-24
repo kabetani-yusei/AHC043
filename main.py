@@ -42,14 +42,30 @@ class Result:
 
 
 class Field:
-    def __init__(self, N: int, person_density):
+    def __init__(self, N: int):
         self.N = N
         self.rail = [[EMPTY] * N for _ in range(N)]
         self.station_list = set()
         self.used = [[(0, 0) for _ in range(self.N)] for _ in range(self.N)]
         self.used_pos = [[False] * self.N for _ in range(self.N)]
         
-        self.person_density = person_density
+        self.person_density = [[0] * self.N for _ in range(N)]
+        
+    def set_up_init_field(self, m, home, workplace):
+        for i in range(m):
+            r1 = home[i][0]
+            c1 = home[i][1]
+            r2 = workplace[i][0]
+            c2 = workplace[i][1]
+            for dr, dc in STATION_AREA_DIR:
+                rr1 = r1 + dr
+                cc1 = c1 + dc
+                rr2 = r2 + dr
+                cc2 = c2 + dc
+                if 0<=rr1<self.N and 0<=cc1<self.N:
+                    self.person_density[rr1][cc1] += 1
+                if 0<=rr2<self.N and 0<=cc2<self.N:
+                    self.person_density[rr2][cc2] += 1
 
     def build(self, type: int, r: int, c: int) -> None:
         assert self.rail[r][c] != STATION
@@ -221,52 +237,8 @@ class Solver:
                 self.ng_person_list[i] = True
             
         self.station_space = [[False] * N for _ in range(N)]
-        person_score = [[0 for _ in range(self.N)] for _ in range(self.N)]
-        for i in range(N):
-            for j in range(N):
-                for dr, dc in STATION_AREA_DIR:
-                    r = i + dr
-                    c = j + dc
-                    if 0 <= r < N and 0 <= c < N:
-                        for ppp in self.person_mapping[r][c]:
-                            person_score[i][j] += distance(home[ppp], workplace[ppp])
-        person_density = [[0 for _ in range(self.N)] for _ in range(self.N)]
-        for i in range(M):
-            best_first = (0, (-1,-1))
-            best_second = (0, (-1,-1))
-            r0 = home[i][0]
-            c0 = home[i][1]
-            r1 = workplace[i][0]
-            c1 = workplace[i][1]
-            for dr, dc in STATION_AREA_DIR:
-                rr0 = r0 + dr
-                cc0 = c0 + dc
-                rr1 = r1 + dr
-                cc1 = c1 + dc
-                if 0 <= rr0 < self.N and 0 <= cc0 < self.N:
-                    tmp_score = 0
-                    for ddr, ddc in STATION_AREA_DIR:
-                        rrr0 = rr0 + ddr
-                        ccc0 = cc0 + ddc
-                        if 0 <= rrr0 < self.N and 0 <= ccc0 < self.N:
-                            tmp_score += person_score[rrr0][ccc0]
-                    if tmp_score > best_first[0]:
-                        best_first = (tmp_score, (rr0, cc0))
-                if 0<= rr1 < self.N and 0 <= cc1 < self.N:
-                    tmp_score = 0
-                    for ddr, ddc in STATION_AREA_DIR:
-                        rrr1 = rr1 + ddr
-                        ccc1 = cc1 + ddc
-                        if 0 <= rrr1 < self.N and 0 <= ccc1 < self.N:
-                            tmp_score += person_score[rrr1][ccc1]
-                    if tmp_score > best_second[0]:
-                        best_second = (tmp_score, (rr1, cc1))
-                        
-            person_density[best_first[1][0]][best_first[1][1]] += best_first[0]
-            person_density[best_second[1][0]][best_second[1][1]] += best_second[0]
-                    
-                    
-        self.field = Field(N, person_density)
+        self.field = Field(N)
+        self.field.set_up_init_field(M, home, workplace)
         self.money = K
         self.income = 0
         self.actions = []
@@ -483,6 +455,36 @@ class Solver:
                             expected_income += distance(self.home[person_idx], self.workplace[person_idx])
         assert expected_income != 0
         return expected_income, person_num
+    
+    def _calclate_expected_income_double(self, r0, c0, r1, c1) -> int:
+        expected_income = 0
+        person_num = 0
+        h = defaultdict(lambda: 0)
+        a = set()
+        
+        for dr, dc in STATION_AREA_DIR:
+            rr0 = r0 + dr
+            cc0 = c0 + dc
+            rr1 = r1 + dr
+            cc1 = c1 + dc
+            if 0 <= rr0 < self.N and 0 <= cc0 < self.N:
+                a.add((rr0, cc0))
+            if 0 <= rr1 < self.N and 0 <= cc1 < self.N:
+                a.add((rr1, cc1))
+            
+        for r, c in list(a):
+            for person_idx in self.person_mapping[r][c]:
+                person_num += 1
+                h[person_idx] += 1
+                if h[person_idx] == 2:
+                    expected_income += distance(self.home[person_idx], self.workplace[person_idx])
+                    person_num -= 2
+                else:
+                    if ((self.home[person_idx] == (r, c) and self.station_space[self.workplace[person_idx][0]][self.workplace[person_idx][1]])
+                        or (self.workplace[person_idx] == (r, c) and self.station_space[self.home[person_idx][0]][self.home[person_idx][1]])):
+                        expected_income += distance(self.home[person_idx], self.workplace[person_idx])
+                        person_num -= 2
+        return expected_income, person_num
         
     def main_build(self) -> bool:
         """
@@ -493,10 +495,13 @@ class Solver:
         remaining_turn = self.T - len(self.actions)
         best_eval = (-1,-1,-1) # incomeの増加分, stationに含まれるpersonの数, build_cost]
         best_place = None # (person_idx, (r, c))　駅の座標 
+        change_flag = False
         self.field.setup_calc_expected_score()
         for person_idx in range(self.M):
             if self.used_person[person_idx] or not self.next_person_candidate[person_idx] or self.ng_person_list[person_idx]:
                 continue
+            
+            change_flag = True
             
             # score_list = [((r, c), (build_cost, build_days)), ((r, c), (build_cost, build_days)), ...]
             if self.station_space[self.home[person_idx][0]][self.home[person_idx][1]]:
@@ -537,6 +542,61 @@ class Solver:
                             elif person_num == best_eval[1] and build_cost < best_eval[2]:
                                 best_eval = (expected_income, person_num, build_cost)
                                 best_place = (person_idx, tmp_score[0])
+                                
+        # 変更がなかった場合(expected_moneyのみで決める)                     
+        if not change_flag:
+            for person_idx in range(self.M):
+                if self.used_person[person_idx] or self.next_person_candidate[person_idx] or self.ng_person_list[person_idx]:
+                    continue
+                
+                # score_list = [((r, c), (build_cost, build_days)), ((r, c), (build_cost, build_days)), ...]
+                score_list_home = self.field.calc_expected_score(self.home[person_idx])
+                score_list_workplace = self.field.calc_expected_score(self.workplace[person_idx])
+                
+                # score: (expected_income, person_num, (r, c))
+                best_place = None
+                best_eval = (-1, 0, 0)
+                for score_home in score_list_home:
+                    for score_workplace in score_list_workplace:
+                        home_build_cost, home_build_days = score_home[1]
+                        workplace_build_cost, workplace_build_days = score_workplace[1]
+                        total_build_cost = home_build_cost + workplace_build_cost
+                        total_build_days = home_build_days + workplace_build_days
+                        total_build_days = max(total_build_days, (total_build_cost - self.money + self.income - 1) // self.income)
+                        if total_build_days > remaining_turn:
+                            continue
+                        expected_income, person_num = self._calclate_expected_income_double(*score_home[0], *score_workplace[0])
+                        expected_money = ((remaining_turn - total_build_days) * expected_income) - total_build_cost
+                        # best_eval = (expected_money, build_days, expected_incomeにする)
+                        if expected_money > best_eval[0]:
+                            best_eval = (expected_money, total_build_days, expected_income)
+                            best_place = (score_home[0], score_workplace[0])
+                        elif expected_money == best_eval[0]:
+                            if total_build_days < best_eval[1]:
+                                best_eval = (expected_money, total_build_days, expected_income)
+                                best_place = (score_home[0], score_workplace[0])
+                            elif total_build_days == best_eval[1] and expected_income > best_eval[2]:
+                                best_eval = (expected_money, total_build_days, expected_income)
+                                best_place = (score_home[0], score_workplace[0])
+            if best_eval[0] == -1:
+                self.build_nothing()
+                self.money += self.income
+                return False
+            else:
+                best_place1, best_place2 = best_place
+                route = self.field.calc_rail_route(best_place1)
+                self.route_placement(route)
+                self.money -= self.income
+                self.calc_income_main(*best_place1)
+                self.money += self.income
+                route = self.field.calc_rail_route(best_place2)
+                self.route_placement(route)
+                self.money -= self.income
+                self.calc_income_main(*best_place2)
+                self.money += self.income
+                return True             
+                                
+                                
                                  
         if best_place is None:
             self.build_nothing()
