@@ -68,9 +68,6 @@ class Field:
                     self.person_density[rr2][cc2] += 1
 
     def build(self, type: int, r: int, c: int) -> None:
-        assert self.rail[r][c] != STATION
-        if 1 <= type <= 6:
-            assert self.rail[r][c] == EMPTY
         self.rail[r][c] = type
         if type == STATION:
             self.station_list.add((r, c))
@@ -382,7 +379,6 @@ class Solver:
                 if h[person_idx] == 2:
                     expected_income += score
                     person_num -= 2
-        assert expected_income != 0
         return expected_income, person_num
     
     def initial_build(self) -> bool:
@@ -453,7 +449,6 @@ class Solver:
                     if ((self.home[person_idx] == (r, c) and self.station_space[self.workplace[person_idx][0]][self.workplace[person_idx][1]])
                         or (self.workplace[person_idx] == (r, c) and self.station_space[self.home[person_idx][0]][self.home[person_idx][1]])):
                             expected_income += distance(self.home[person_idx], self.workplace[person_idx])
-        assert expected_income != 0
         return expected_income, person_num
     
     def _calclate_expected_income_double(self, r0, c0, r1, c1) -> int:
@@ -517,7 +512,21 @@ class Solver:
                     continue
                 expected_income, person_num = self._calclate_expected_income_main(*tmp_score[0])
                 expected_money = ((remaining_turn - build_days) * expected_income) - build_cost
-                if remaining_turn <= 200:
+                if self.money >= 5000:
+                    # コスパ重視で決めていく(expected_income / build_days)
+                    # best_eval = (cost_peformance, build_days, expected_money)
+                    cost_peformance = (expected_money / build_days)
+                    if cost_peformance > best_eval[0]:
+                        best_eval = (cost_peformance, person_num, expected_money)
+                        best_place = (person_idx, tmp_score[0])
+                    elif cost_peformance == best_eval[0]:
+                        if person_num > best_eval[1]:
+                            best_eval = (cost_peformance, person_num, expected_money)
+                            best_place = (person_idx, tmp_score[0])
+                        elif person_num == best_eval[1] and expected_money > best_eval[2]:
+                            best_eval = (cost_peformance, person_num, expected_money)
+                            best_place = (person_idx, tmp_score[0])
+                elif remaining_turn <= 100:
                     # best_eval = (expected_money, build_days, expected_incomeにする)
                     if expected_money > best_eval[0]:
                         best_eval = (expected_money, build_days, expected_income)
