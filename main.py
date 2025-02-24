@@ -42,30 +42,14 @@ class Result:
 
 
 class Field:
-    def __init__(self, N: int):
+    def __init__(self, N: int, person_density):
         self.N = N
         self.rail = [[EMPTY] * N for _ in range(N)]
         self.station_list = set()
         self.used = [[(0, 0) for _ in range(self.N)] for _ in range(self.N)]
         self.used_pos = [[False] * self.N for _ in range(self.N)]
         
-        self.person_density = [[0] * self.N for _ in range(N)]
-        
-    def set_up_init_field(self, m, home, workplace):
-        for i in range(m):
-            r1 = home[i][0]
-            c1 = home[i][1]
-            r2 = workplace[i][0]
-            c2 = workplace[i][1]
-            for dr, dc in STATION_AREA_DIR:
-                rr1 = r1 + dr
-                cc1 = c1 + dc
-                rr2 = r2 + dr
-                cc2 = c2 + dc
-                if 0<=rr1<self.N and 0<=cc1<self.N:
-                    self.person_density[rr1][cc1] += 1
-                if 0<=rr2<self.N and 0<=cc2<self.N:
-                    self.person_density[rr2][cc2] += 1
+        self.person_density = person_density
 
     def build(self, type: int, r: int, c: int) -> None:
         assert self.rail[r][c] != STATION
@@ -237,8 +221,52 @@ class Solver:
                 self.ng_person_list[i] = True
             
         self.station_space = [[False] * N for _ in range(N)]
-        self.field = Field(N)
-        self.field.set_up_init_field(M, home, workplace)
+        person_score = [[0 for _ in range(self.N)] for _ in range(self.N)]
+        for i in range(N):
+            for j in range(N):
+                for dr, dc in STATION_AREA_DIR:
+                    r = i + dr
+                    c = j + dc
+                    if 0 <= r < N and 0 <= c < N:
+                        for ppp in self.person_mapping[r][c]:
+                            person_score[i][j] += distance(home[ppp], workplace[ppp])
+        person_density = [[0 for _ in range(self.N)] for _ in range(self.N)]
+        for i in range(M):
+            best_first = (0, (-1,-1))
+            best_second = (0, (-1,-1))
+            r0 = home[i][0]
+            c0 = home[i][1]
+            r1 = workplace[i][0]
+            c1 = workplace[i][1]
+            for dr, dc in STATION_AREA_DIR:
+                rr0 = r0 + dr
+                cc0 = c0 + dc
+                rr1 = r1 + dr
+                cc1 = c1 + dc
+                if 0 <= rr0 < self.N and 0 <= cc0 < self.N:
+                    tmp_score = 0
+                    for ddr, ddc in STATION_AREA_DIR:
+                        rrr0 = rr0 + ddr
+                        ccc0 = cc0 + ddc
+                        if 0 <= rrr0 < self.N and 0 <= ccc0 < self.N:
+                            tmp_score += person_score[rrr0][ccc0]
+                    if tmp_score > best_first[0]:
+                        best_first = (tmp_score, (rr0, cc0))
+                if 0<= rr1 < self.N and 0 <= cc1 < self.N:
+                    tmp_score = 0
+                    for ddr, ddc in STATION_AREA_DIR:
+                        rrr1 = rr1 + ddr
+                        ccc1 = cc1 + ddc
+                        if 0 <= rrr1 < self.N and 0 <= ccc1 < self.N:
+                            tmp_score += person_score[rrr1][ccc1]
+                    if tmp_score > best_second[0]:
+                        best_second = (tmp_score, (rr1, cc1))
+                        
+            person_density[best_first[1][0]][best_first[1][1]] += best_first[0]
+            person_density[best_second[1][0]][best_second[1][1]] += best_second[0]
+                    
+                    
+        self.field = Field(N, person_density)
         self.money = K
         self.income = 0
         self.actions = []
