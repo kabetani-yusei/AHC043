@@ -512,7 +512,7 @@ class Solver:
                     continue
                 expected_income, person_num = self._calclate_expected_income_main(*tmp_score[0])
                 expected_money = ((remaining_turn - build_days) * expected_income) - build_cost
-                if self.money >= 5000:
+                if self.money >= 6000:
                     # コスパ重視で決めていく(expected_income / build_days)
                     # best_eval = (cost_peformance, build_days, expected_money)
                     cost_peformance = (expected_money / build_days)
